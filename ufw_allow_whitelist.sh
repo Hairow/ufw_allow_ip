@@ -18,22 +18,81 @@ print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 print_title() { echo -e "${CYAN}========================================${NC}"; echo -e "${CYAN}$1${NC}"; echo -e "${CYAN}========================================${NC}"; }
 print_subtitle() { echo -e "${MAGENTA}--- $1 ---${NC}"; }
 
-validate_ip() {
+validate_ipv4() {
     local ip=$1
     if [[ ! "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then return 1; fi
     IFS='.' read -r a b c d <<< "$ip"
-    if [ "$a" -le 255 ] && [ "$b" -le 255 ] && [ "$c" -le 255 ] && [ "$d" -le 255 ]; then return 0; fi
-    return 1
+    [ "$a" -le 255 ] && [ "$b" -le 255 ] && [ "$c" -le 255 ] && [ "$d" -le 255 ]
+}
+
+validate_ipv6() {
+    local ip=$1
+    [[ "$ip" != *:* ]] && return 1
+
+    # :: 最多出现一次
+    local dc_count
+    dc_count=$(echo "$ip" | grep -o '::' | wc -l | tr -d ' ')
+    [[ $dc_count -gt 1 ]] && return 1
+
+    local -a groups
+    if [[ $dc_count -eq 1 ]]; then
+        local before="${ip%%::*}"
+        local after="${ip##*::}"
+        [[ -n "$before" ]] && IFS=':' read -ra groups <<< "$before"
+        local before_count=${#groups[@]}
+        groups=()
+        [[ -n "$after" ]] && IFS=':' read -ra groups <<< "$after"
+        local after_count=${#groups[@]}
+        # :: 替代至少 1 组，可见组数最多 7
+        [[ $((before_count + after_count)) -gt 7 ]] && return 1
+        # 重新组装校验各组
+        groups=()
+        [[ -n "$before" ]] && IFS=':' read -ra groups <<< "$before"
+        for g in "${groups[@]}"; do
+            [[ ! "$g" =~ ^[0-9a-fA-F]{1,4}$ ]] && return 1
+        done
+        groups=()
+        [[ -n "$after" ]] && IFS=':' read -ra groups <<< "$after"
+        for g in "${groups[@]}"; do
+            [[ ! "$g" =~ ^[0-9a-fA-F]{1,4}$ ]] && return 1
+        done
+    else
+        IFS=':' read -ra groups <<< "$ip"
+        [[ ${#groups[@]} -ne 8 ]] && return 1
+        for g in "${groups[@]}"; do
+            [[ ! "$g" =~ ^[0-9a-fA-F]{1,4}$ ]] && return 1
+        done
+    fi
+    return 0
+}
+
+is_ipv6() {
+    [[ "$1" == *:* ]]
 }
 
 validate_ip_or_cidr() {
     local input=$1
-    if [[ "$input" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$ ]]; then
-        local ip="${input%/*}"
+
+    # 检查是否包含 CIDR 前缀
+    if [[ "$input" =~ / ]]; then
+        local addr="${input%/*}"
         local mask="${input#*/}"
-        if validate_ip "$ip" && [ "$mask" -ge 0 ] && [ "$mask" -le 32 ]; then return 0; fi
+        if ! [[ "$mask" =~ ^[0-9]+$ ]]; then return 1; fi
+
+        if is_ipv6 "$addr"; then
+            validate_ipv6 "$addr" && [ "$mask" -ge 0 ] && [ "$mask" -le 128 ] && return 0
+        else
+            validate_ipv4 "$addr" && [ "$mask" -ge 0 ] && [ "$mask" -le 32 ] && return 0
+        fi
+        return 1
     fi
-    if validate_ip "$input"; then return 0; fi
+
+    # 不含 CIDR，直接校验 IP
+    if is_ipv6 "$input"; then
+        validate_ipv6 "$input" && return 0
+    else
+        validate_ipv4 "$input" && return 0
+    fi
     return 1
 }
 
@@ -281,10 +340,18 @@ fi
 echo ""
 echo "IP 列表:"
 for entry in "${ip_entries[@]}"; do
-    if [[ "$entry" =~ / ]]; then
-        echo "  📶 $entry (CIDR)"
+    if is_ipv6 "$entry"; then
+        if [[ "$entry" =~ / ]]; then
+            echo "  🌐 $entry (IPv6 CIDR)"
+        else
+            echo "  🌐 $entry (单个IPv6)"
+        fi
     else
-        echo "  📍 $entry (单个IP)"
+        if [[ "$entry" =~ / ]]; then
+            echo "  📍 $entry (IPv4 CIDR)"
+        else
+            echo "  📍 $entry (单个IPv4)"
+        fi
     fi
 done
 echo "========================================"
@@ -322,10 +389,18 @@ entry_count=0
 
 for entry in "${ip_entries[@]}"; do
     ((entry_count++))
-    if [[ "$entry" =~ / ]]; then
-        print_info "[$entry_count/$total_entries] 处理 CIDR: $entry"
+    if is_ipv6 "$entry"; then
+        if [[ "$entry" =~ / ]]; then
+            print_info "[$entry_count/$total_entries] 处理 IPv6 CIDR: $entry"
+        else
+            print_info "[$entry_count/$total_entries] 处理 IPv6: $entry"
+        fi
     else
-        print_info "[$entry_count/$total_entries] 处理 IP: $entry"
+        if [[ "$entry" =~ / ]]; then
+            print_info "[$entry_count/$total_entries] 处理 IPv4 CIDR: $entry"
+        else
+            print_info "[$entry_count/$total_entries] 处理 IPv4: $entry"
+        fi
     fi
     for port in "${port_list[@]}"; do
         if [ "$MODE" = "ADD" ]; then

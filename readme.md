@@ -11,7 +11,7 @@
 - **智能检测**：自动跳过已存在的规则（添加时）或不存在的规则（删除时）
 - **操作日志**：所有操作记录到 `/var/log/ufw_whitelist.log`
 - **格式校验**：自动验证 IP/CIDR/端口的有效性，过滤无效条目
-- **支持 IPv4 CIDR**：自动处理网段规则
+- **支持 IPv4/IPv6**：同时支持 IPv4 和 IPv6 地址及 CIDR 网段
 
 ## 快速开始
 
@@ -52,8 +52,6 @@ sudo bash ufw_allow_whitelist.sh
 | `ip.txt` | 当前使用的白名单 IP 列表（运行前需手动指定） |
 | `china_ipv4&6.txt` | 中国 IP 地址段列表 |
 | `cloudflare_ipv4&6.txt` | Cloudflare IP 地址段列表（含 IPv6） |
-
-> **注意**：`ip.txt` 中的 IPv6 地址当前不会被处理（脚本仅校验 IPv4 格式）。
 
 ## 端口输入示例
 
